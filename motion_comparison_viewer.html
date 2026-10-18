@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>動き比較ビューアー</title>
+<style>
+:root{color-scheme:dark;--bg:#101722;--panel:#182333;--line:#34445b;--blue:#55a7ff}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:#edf4ff;font-family:system-ui,-apple-system,"Segoe UI",sans-serif}
+main{max-width:1200px;margin:auto;padding:18px}
+h1{font-size:clamp(22px,4vw,32px);margin:0 0 6px}p{color:#b8c7da;line-height:1.6;margin:4px 0 16px}
+.layout{display:grid;grid-template-columns:minmax(0,1fr) 310px;gap:14px}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px;min-width:0}
+.viewer{background:#05080c;border-radius:10px;overflow:hidden;position:relative;min-height:200px;display:flex;align-items:center;justify-content:center}
+canvas{display:block;width:100%;height:auto;max-height:70vh;object-fit:contain}
+.legend{position:absolute;top:10px;left:10px;background:#07101ccc;border-radius:8px;padding:7px 10px;font-size:13px}
+.dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:6px}
+.controls{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:12px}
+button,.filelabel{background:#23344a;border:1px solid #50647f;color:#f4f8ff;border-radius:9px;padding:9px 12px;cursor:pointer;font-size:14px}
+button:hover,.filelabel:hover{background:#2d4664}.primary{background:#1269c7;border-color:#3188e8}
+input[type=file]{display:none}input[type=range]{width:100%;accent-color:var(--blue)}
+.control{margin:16px 0}.control label,.sectiontitle{display:block;font-weight:650;margin-bottom:8px}.sub{font-size:12px;color:#aabbd0}
+.filebox{border:1px solid var(--line);border-radius:9px;padding:10px;margin:10px 0}
+.filebox strong{display:block;font-size:14px;margin-bottom:5px}.filename{font-size:12px;color:#bdcce0;overflow-wrap:anywhere}
+select{width:100%;background:#0e1723;color:white;border:1px solid var(--line);padding:9px;border-radius:8px}
+hr{border:0;border-top:1px solid var(--line);margin:16px 0}
+.status{font-size:13px;color:#a9c9ee;min-height:20px;margin-top:8px}
+#v1,#v2{display:none}
+@media(max-width:800px){.layout{grid-template-columns:1fr}main{padding:10px}.panel{padding:10px}}
+</style>
+</head>
+<body>
+<main>
+  <h1>動き比較ビューアー</h1>
+  <p>動画を2本読み込み、透明度を調整して重ねて再生できます。動画はこのブラウザー内で処理します。</p>
+  <div class="layout">
+    <section class="panel">
+      <div class="viewer">
+        <canvas id="out" width="1280" height="720" aria-label="重ね合わせ表示"></canvas>
+        <div class="legend"><div><span class="dot" style="background:#55a7ff"></span>動画1（ベース）</div><div><span class="dot" style="background:#ff9a52"></span>動画2（重ね合わせ）</div></div>
+      </div>
+      <div class="controls">
+        <button id="play" class="primary">▶ 再生</button>
+        <button id="pause">⏸ 停止</button>
+        <button id="reset">↺ 最初から</button>
+        <span id="time" class="sub">00:00 / 00:00</span>
+      </div>
+      <div class="control">
+        <label for="seek">再生位置</label><input id="seek" type="range" min="0" max="1000" value="0">
+      </div>
+      <div class="controls">
+        <button id="savepng">現在のフレームをPNG保存</button>
+        <button id="record" class="primary">重ね合わせ動画を録画</button>
+        <button id="stoprecord" disabled>録画終了</button>
+      </div>
+      <div id="status" class="status">動画1と動画2を読み込んでください。</div>
+    </section>
+    <aside class="panel">
+      <div class="sectiontitle">動画の読み込み</div>
+      <div class="filebox">
+        <strong>動画1（ベース）</strong>
+        <label class="filelabel" for="file1">動画1を選ぶ</label><input id="file1" type="file" accept="video/*">
+        <div id="name1" class="filename">未選択</div>
+      </div>
+      <div class="filebox">
+        <strong>動画2（重ね合わせ）</strong>
+        <label class="filelabel" for="file2">動画2を選ぶ</label><input id="file2" type="file" accept="video/*">
+        <div id="name2" class="filename">未選択</div>
+      </div>
+      <hr>
+      <div class="control">
+        <label for="opacity">動画2の透明度：<span id="opacityval">50%</span></label>
+        <input id="opacity" type="range" min="0" max="100" value="50">
+        <div class="sub">0%＝動画2を表示しない／100%＝動画2を完全表示</div>
+      </div>
+      <div class="control">
+        <label for="mode">表示方法</label>
+        <select id="mode"><option value="overlay">重ねて表示</option><option value="side">左右に並べる</option></select>
+      </div>
+      <div class="control">
+        <label for="fit">位置合わせ（簡易）</label>
+        <select id="fit"><option value="contain">全体を表示（縦横比を維持）</option><option value="cover">画面いっぱいに拡大して切り抜く</option></select>
+      </div>
+      <div class="control">
+        <label for="speed">再生速度</label>
+        <select id="speed"><option value="0.25">0.25倍</option><option value="0.5">0.5倍</option><option value="0.75">0.75倍</option><option value="1" selected>1倍</option></select>
+      </div>
+      <button id="sync">動画2を動画1の位置に合わせる</button>
+      <p class="sub">比較のコツ：撮影位置やカメラの高さが違うと、重ねたときにズレて見えます。まずはカメラ位置が近い動画を使ってください。</p>
+    </aside>
+  </div>
+</main>
+<video id="v1" playsinline preload="metadata" muted></video>
+<video id="v2" playsinline preload="metadata" muted></video>
+<script>
+(() => {
+const $ = id => document.getElementById(id);
+const c=$('out'), ctx=c.getContext('2d'), v1=$('v1'), v2=$('v2');
+let urls=[null,null], raf=0, recorder=null, chunks=[];
+const status=t=>$('status').textContent=t;
+function fmt(s){if(!Number.isFinite(s))s=0;return `${String(Math.floor(s/60)).padStart(2,'0')}:${String(Math.floor(s%60)).padStart(2,'0')}`}
+function dimensions(){let a=v1.videoWidth||16,b=v1.videoHeight||9;if(!v1.videoWidth){a=v2.videoWidth||16;b=v2.videoHeight||9}
+ if($('mode').value==='side' && v1.videoWidth && v2.videoWidth){c.width=1280;c.height=720}
+ else {let ratio=a/b;c.width=1280;c.height=Math.max(1,Math.round(1280/ratio));if(c.height>1000){c.height=1000;c.width=Math.round(1000*ratio)}}}
+function drawVideo(video,x,y,w,h,alpha=1,mode='contain'){
+ if(!video.videoWidth||video.readyState<2)return;
+ let sw=video.videoWidth,sh=video.videoHeight,scale=mode==='cover'?Math.max(w/sw,h/sh):Math.min(w/sw,h/sh);
+ let dw=sw*scale,dh=sh*scale,dx=x+(w-dw)/2,dy=y+(h-dh)/2;
+ ctx.globalAlpha=alpha;ctx.drawImage(video,dx,dy,dw,dh);ctx.globalAlpha=1;
+}
+function render(){
+ ctx.clearRect(0,0,c.width,c.height);ctx.fillStyle='#05080c';ctx.fillRect(0,0,c.width,c.height);
+ let mode=$('mode').value, fit=$('fit').value, op=Number($('opacity').value)/100;
+ if(mode==='side'){
+   ctx.fillStyle='#182333';ctx.fillRect(c.width/2-1,0,2,c.height);
+   drawVideo(v1,0,0,c.width/2,c.height,1,fit);
+   drawVideo(v2,c.width/2,0,c.width/2,c.height,1,fit);
+ }else{
+   drawVideo(v1,0,0,c.width,c.height,1,fit);
+   drawVideo(v2,0,0,c.width,c.height,op,fit);
+ }
+ $('time').textContent=`${fmt(v1.currentTime)} / ${fmt(Math.max(v1.duration||0,v2.duration||0))}`;
+ if(v1.duration>0)$('seek').value=Math.round(v1.currentTime/v1.duration*1000);
+ raf=requestAnimationFrame(render);
+}
+function ensureRender(){if(!raf)render()}
+function loadFile(which,file){
+ if(!file)return;const v=which===0?v1:v2;
+ if(urls[which])URL.revokeObjectURL(urls[which]);
+ urls[which]=URL.createObjectURL(file);v.src=urls[which];v.load();
+ $(which===0?'name1':'name2').textContent=file.name;
+ v.onloadedmetadata=()=>{dimensions();render();status('読み込み完了。再生して重ね合わせを確認できます。')};
+ v.onerror=()=>status('この動画を読み込めませんでした。MP4（H.264）などの形式を試してください。');
+}
+$('file1').addEventListener('change',e=>loadFile(0,e.target.files[0]));
+$('file2').addEventListener('change',e=>loadFile(1,e.target.files[0]));
+$('opacity').addEventListener('input',()=>{$('opacityval').textContent=$('opacity').value+'%';});
+$('mode').addEventListener('change',dimensions);$('fit').addEventListener('change',render);
+$('speed').addEventListener('change',()=>{v1.playbackRate=Number($('speed').value);v2.playbackRate=Number($('speed').value)});
+$('play').onclick=async()=>{
+ if(!v1.src||!v2.src){status('先に動画1と動画2を選んでください。');return}
+ try{v1.playbackRate=v2.playbackRate=Number($('speed').value); if(v1.ended||v2.ended){v1.currentTime=0;v2.currentTime=0}
+ await Promise.all([v1.play(),v2.play()]);status('再生中。動画の長さが違う場合、短い方は先に止まります。')}
+ catch(e){status('再生できませんでした。動画形式を確認してください。')}
+};
+$('pause').onclick=()=>{v1.pause();v2.pause()};
+$('reset').onclick=()=>{v1.pause();v2.pause();v1.currentTime=0;v2.currentTime=0};
+$('seek').addEventListener('input',()=>{if(v1.duration)v1.currentTime=Number($('seek').value)/1000*v1.duration;if(v2.duration)v2.currentTime=Math.min(v2.duration,Number($('seek').value)/1000*(v1.duration||v2.duration))});
+$('sync').onclick=()=>{if(v1.duration&&v2.duration)v2.currentTime=Math.min(v2.duration,v1.currentTime);status('動画2の再生位置を動画1に合わせました。')};
+$('savepng').onclick=()=>{render();const a=document.createElement('a');a.download='motion-comparison.png';a.href=c.toDataURL('image/png');a.click()};
+$('record').onclick=()=>{
+ if(!v1.src||!v2.src){status('録画する前に動画を2本読み込んでください。');return}
+ if(!c.captureStream||!window.MediaRecorder){status('このブラウザーは動画録画に対応していません。ChromeまたはEdgeを試してください。');return}
+ chunks=[];const stream=c.captureStream(30);
+ try{recorder=new MediaRecorder(stream,{mimeType:MediaRecorder.isTypeSupported('video/webm;codecs=vp9')?'video/webm;codecs=vp9':'video/webm'})}
+ catch(e){recorder=new MediaRecorder(stream)}
+ recorder.ondataavailable=e=>{if(e.data.size)chunks.push(e.data)};
+ recorder.onstop=()=>{const blob=new Blob(chunks,{type:'video/webm'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='motion-comparison.webm';a.click();setTimeout(()=>URL.revokeObjectURL(url),2000);status('録画を保存しました。')};
+ recorder.start();$('record').disabled=true;$('stoprecord').disabled=false;status('録画中です。再生して、終わったら「録画終了」を押してください。');
+};
+$('stoprecord').onclick=()=>{if(recorder&&recorder.state!=='inactive')recorder.stop();$('record').disabled=false;$('stoprecord').disabled=true};
+v1.addEventListener('ended',()=>{v1.pause();v2.pause()});v2.addEventListener('ended',()=>{v1.pause();v2.pause()});
+dimensions();ensureRender();
+})();
+</script>
+</body></html>
